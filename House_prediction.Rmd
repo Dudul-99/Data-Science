@@ -133,7 +133,7 @@ cormat %>% as.data.frame %>% mutate(var2=rownames(.)) %>%
 ```
 
 ```{r}
-highcorr <- which(cormat["SalePrice", ] > 0.62 & cormat["SalePrice", ] < 1)
+highcorr <- which(cormat["SalePrice", ] > 0.6 & cormat["SalePrice", ] < 1)
 
 result <- data.frame(
   Variable1 = rownames(cormat)[highcorr],
@@ -202,7 +202,7 @@ for (variable in names(tests)) {
   test_result <- tests[[variable]]
   
   # Vérifier si le Kruskal-Wallis chi-squared est supérieur à 100
-  if (test_result$statistic > 400) {
+  if (test_result$statistic > 305) {
     # Ajouter la variable et la valeur p correspondante au dataframe
     significant_vars <- rbind(significant_vars, data.frame(variable = variable, p_value = test_result$p.value, seuil=test_result$statistic))
   }
@@ -415,7 +415,7 @@ soumission<-data_test_copy
 soumission$SalePrice <- predictions
 # Sauvegarde du fichier
 # Sauvegarder le dataframe data_test_copy au format CSV
-#write.csv(soumission, file = "/Users/abdul/Desktop/machine learning/data/home-data-for-ml-course/soumission_R.csv", row.names = FALSE)
+write.csv(soumission, file = "/Users/abdul/Desktop/machine learning/data/home-data-for-ml-course/soumission_R.csv", row.names = FALSE)
 
 ```
 
