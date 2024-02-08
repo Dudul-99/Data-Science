@@ -1,0 +1,421 @@
+---
+title: "House_prediction"
+author: "Abdul BOURA"
+date: "2024-02-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Library
+
+```{r}
+library(tidyverse)
+library(caret)
+library(party)
+library(dplyr)
+library(janitor)
+library(dlookr)
+library(sjPlot)
+library(corrplot)
+library(ggcorrplot)
+```
+
+# Set seeding
+
+```{r}
+set.seed(42)
+options(scipen = 999)
+```
+
+# import des datas
+
+```{r}
+data <- read.csv("/Users/abdul/Desktop/machine learning/data/home-data-for-ml-course/train.csv")
+```
+
+# Observation du dataset
+
+```{r}
+data %>% dim()
+data %>% head()
+```
+
+On voit que le dataset fait 1460 individu pour 81 variables. La colonne 'Id' ne nou sert à rien donc on l'enlève.
+
+```{r}
+data <- dplyr::select(data, -Id)
+```
+
+
+# Missing values
+```{r}
+data %>%  dlookr::diagnose() %>% 
+  arrange(desc(missing_percent))
+```
+
+On voit que plusieurs variables ont trop de valeur manquantes (supérieurs à 45% ). On va donc les retirer.
+
+```{r}
+out_na <- function(data, seuil) {
+  # sum des NA
+  na_counts <- sapply(data, function(x) sum(is.na(x)))
+  # nombres des observations
+  total_counts <- sapply(data, length)
+  # proportion des NA
+  na_proportions <- na_counts / total_counts
+  # Variable à supprimer
+  vars_to_remove <- names(na_proportions[na_proportions > seuil])
+  # Filtrage des variables 
+  data <- data[, !names(data) %in% vars_to_remove]
+  return(data)
+}
+```
+
+```{r}
+data <- out_na(data, 0.45)
+data %>%  dlookr::diagnose() %>% 
+  arrange(desc(missing_percent))
+```
+
+
+
+# Observation des variables
+
+## Outcome
+
+
+```{r}
+data %>% 
+  ggplot(aes(x=SalePrice)) + 
+  geom_histogram(aes(y = stat(density)), 
+                   colour="black", fill="white",bins = 100) +
+  geom_density(alpha = 0.2, fill = "steelblue") +
+  theme_minimal() 
+```
+
+
+
+## Autres variables 
+
+## Numeric
+```{r}
+data_num <- data %>% 
+  select_if(is.numeric)
+tempo_num1<-data_num[,1:18]
+tempo_num2<-data_num[,19:37]
+
+tempo_num1 %>% gather() %>%
+  ggplot(aes(x=value)) + 
+  geom_histogram(fill="steelblue", alpha=.7) +
+  theme_minimal() +
+  facet_wrap(~key, scales="free")
+
+tempo_num2 %>% gather() %>%
+  ggplot(aes(x=value)) + 
+  geom_histogram(fill="steelblue", alpha=.7) +
+  theme_minimal() +
+  facet_wrap(~key, scales="free")
+rm(tempo_num1,tempo_num2)
+```
+
+```{r}
+cormat <- cor(data_num %>% keep(is.numeric))
+
+cormat %>% as.data.frame %>% mutate(var2=rownames(.)) %>%
+  pivot_longer(!var2, values_to = "value") %>%
+  ggplot(aes(x=name,y=var2,fill=abs(value),label=round(value,2))) +
+  geom_tile() + geom_label() + xlab("") + ylab("") +
+  ggtitle("Correlation matrix of our predictors") +
+  labs(fill="Correlation\n(absolute):")
+```
+
+```{r}
+highcorr <- which(cormat["SalePrice", ] > 0.6 & cormat["SalePrice", ] < 1)
+
+result <- data.frame(
+  Variable1 = rownames(cormat)[highcorr],
+  Variable2 = "SalePrice",
+  Correlation = cormat["SalePrice", highcorr]
+)
+result
+# Sauvegarde des variables d'intérêt
+noms_num<-result$Variable1
+```
+
+
+
+
+
+## categoriel
+
+```{r}
+data_cat <- data %>%
+  select(where(is.character), 'SalePrice')
+
+data_cat %>%  dlookr::diagnose() %>% 
+  arrange(desc(missing_percent))
+```
+## Graphique
+```{r}
+datas<-data_cat %>% select(-SalePrice)
+nons<-names(datas)
+
+plots <- list()
+for (variable in nons) {
+  p <- ggplot(data, aes(x = .data[[variable]], y = SalePrice)) +
+    geom_boxplot() +
+    theme_minimal()
+  
+  # Ajouter le graphique à la liste
+  plots[[variable]] <- p
+}
+
+# Afficher les graphiques de la liste
+plots
+
+```
+
+## test statistiques
+```{r}
+datas<-data_cat %>% select(-SalePrice)
+nons<-names(datas)
+tests<-list()
+for (variable in nons) {
+  p<-kruskal.test(SalePrice ~ data[[variable]], data = data_cat)
+  
+  tests[[variable]] <- p
+}
+tests
+```
+
+## Sélection des variables ayant plus d'impact
+```{r}
+# Créer un dataframe vide pour stocker les résultats des tests avec un Kruskal-Wallis chi-squared supérieur à 100
+significant_vars <- data.frame(variable = character(), p_value = numeric(), seuil=numeric(),stringsAsFactors = FALSE)
+
+# Parcourir les résultats des tests de Kruskal-Wallis
+for (variable in names(tests)) {
+  # Extraire le résultat du test pour la variable actuelle
+  test_result <- tests[[variable]]
+  
+  # Vérifier si le Kruskal-Wallis chi-squared est supérieur à 100
+  if (test_result$statistic > 305) {
+    # Ajouter la variable et la valeur p correspondante au dataframe
+    significant_vars <- rbind(significant_vars, data.frame(variable = variable, p_value = test_result$p.value, seuil=test_result$statistic))
+  }
+}
+
+# Afficher les variables ayant un Kruskal-Wallis chi-squared supérieur à 100
+print(significant_vars)
+
+# Sauvegarde des varibales
+
+noms_cat<-significant_vars$variable
+```
+
+
+
+
+
+# data pre processing
+
+On voit qu'il y a plusieurs variables que l'on peut regrouper afin de synthétiser l'information.
+On va en profiter pour imputer par la moyenne et ensuite regrouper celle qui vont ensemble.
+
+## Selection des variables
+
+```{r}
+noms_outcome<-c('SalePrice')
+data_retenu <- data[, c(noms_cat, noms_num,noms_outcome)]
+names(data_retenu)
+```
+
+
+```{r}
+data_retenu %>% 
+  diagnose() %>% 
+  arrange(desc(missing_percent))
+```
+
+
+## Numéric imputation
+
+```{r}
+impute_mean_numeric <- function(data) {
+  for (variable_name in names(data)) {
+    # Vérifier si la variable est numérique
+    if (is.numeric(data[[variable_name]]) && anyNA(data[[variable_name]])) {
+      mean_value <- mean(data[[variable_name]], na.rm = TRUE)
+      data[[variable_name]][is.na(data[[variable_name]])] <- mean_value
+    }
+  }
+  return(data)
+}
+
+
+```
+
+
+```{r}
+data_retenu_process<-impute_mean_numeric(data_retenu)
+```
+
+
+```{r}
+data_retenu_process %>% 
+  diagnose()
+```
+
+# catégoriel
+
+```{r}
+impute_mode_onehot <- function(data) {
+  # Parcourir les colonnes du dataframe
+  for (col_name in names(data)) {
+    # Vérifier si la colonne est de type caractère (catégorielle)
+    if (is.character(data[[col_name]])) {
+      # Imputer les valeurs manquantes par le mode
+      mode_value <- names(sort(table(data[[col_name]]), decreasing = TRUE))[1]
+      data[[col_name]][is.na(data[[col_name]])] <- mode_value
+      
+      # Effectuer le one-hot encoding
+      dummy_cols <- as.data.frame(model.matrix(~ 0 + data[[col_name]]))
+      colnames(dummy_cols) <- paste(col_name, colnames(dummy_cols), sep = "_")
+      data <- cbind(data, dummy_cols)
+    }
+  }
+  
+  # Supprimer les colonnes originales
+  data <- data[, !sapply(data, is.character)]
+  
+  return(data)
+}
+
+
+```
+
+
+```{r}
+test<-impute_mode_onehot(data_retenu_process)
+test %>% diagnose()
+```
+
+
+
+# Machine learning
+
+```{r}
+index <- createDataPartition(test$SalePrice, p = 0.8, list = FALSE)
+
+# Créer les ensembles d'entraînement et de test
+train_set <- test[index, ]
+test_set <- test[-index, ]
+
+# Création vecteur d'outcome
+y_train<-train_set$SalePrice
+y_test<-test_set$SalePrice
+
+#Suppression des vecteurs sur les datasets
+
+train_set<-train_set %>% select(-SalePrice)
+test_set<-test_set %>% select(-SalePrice)
+```
+
+## Model de rf
+```{r}
+mod <- caret::train(train_set, y_train, method="rf", 
+                    tuneGrid = expand.grid(mtry = seq(5,ncol(train_set),by=5)),
+                    trControl = trainControl(method="cv", number=5, verboseIter = T))
+mod
+```
+
+```{r}
+plot(varImp(mod), main="Feature importance of random forest model on training data")
+
+```
+
+```{r}
+mod2 <- caret::train(train_set, y_train, method="xgbTree", 
+                    tuneGrid = expand.grid(nrounds=c(50,100),max_depth=c(5,7,9),
+                                           colsample_bytree=c(0.8,1),subsample=c(0.8,1),
+                                           min_child_weight=c(1,5,10),eta=c(0.1,0.3),gamma=c(0,0.5)),
+                    trControl = trainControl(method="cv", number=5, verboseIter = T))
+mod2
+
+```
+
+```{r}
+plot(varImp(mod2), main="Feature importance of XGBoost model on training data")
+
+```
+
+## Comparaison
+
+```{r}
+table_result <- data.frame(Model = c(mod$method,mod2$method),
+                      RMSE = c(min(mod$results$RMSE), min(mod2$results$RMSE)))
+
+
+```
+
+
+```{r avant xgboost 28310,83 et rf 29646}
+table_result %>% ggplot(aes(x=Model, y=RMSE, label=paste(round(RMSE,1)))) +
+  geom_col(fill="steelblue") + theme_minimal() + geom_label() +
+  ggtitle("RMSE in the training data by algorithm")
+```
+
+## Model sur data test
+
+```{r xgboost 29212}
+predictions <- predict(mod2, newdata = test_set)
+RMSE(predictions,obs=y_test)
+
+```
+
+# Application sur dataset de soumission
+
+```{r}
+data_test <- read.csv("/Users/abdul/Desktop/machine learning/data/home-data-for-ml-course/test.csv")
+data_test_copy <- dplyr::select(data_test, Id)
+data_test <- dplyr::select(data_test, -Id)
+data_test <- out_na(data_test, 0.45)
+data_test <- data_test[, c(noms_cat, noms_num)]
+data_test<-impute_mode_onehot(data_test)
+data_test<-impute_mean_numeric(data_test)
+
+```
+
+
+```{r}
+data_test %>% diagnose() %>% arrange(desc(missing_percent))
+```
+
+
+
+```{r}
+ dim(test_set)
+dim(data_test)
+setdiff(colnames(test_set), colnames(data_test))
+predictions <- predict(mod2, newdata = data_test)
+
+```
+
+
+# doc final
+
+```{r eval=FALSE,echo=}
+#data_test_copy
+#predictions
+soumission<-data_test_copy
+# Ajouter une colonne 'SalePrice' à data_test_copy et la remplir avec les valeurs de predictions
+soumission$SalePrice <- predictions
+# Sauvegarde du fichier
+# Sauvegarder le dataframe data_test_copy au format CSV
+write.csv(soumission, file = "/Users/abdul/Desktop/machine learning/data/home-data-for-ml-course/soumission_R.csv", row.names = FALSE)
+
+```
+
