@@ -25,3 +25,37 @@ def prepare_data_test(x):
     numerical_features = ['Age', 'RoomService', 'FoodCourt', 'ShoppingMall', 'Spa', 'VRDeck']
     return x
 
+
+def prediction_instance(model, dataf):
+    # Transform dataf using the pipeline
+    tempo = full_pipeline_loaded.transform(dataf)
+    
+    # Get feature names from the model
+    feature_names = model.get_booster().feature_names
+    
+    # Create DataFrame with features as columns
+    data = pd.DataFrame(columns=feature_names, data=tempo)
+    # fill with NA for value not present
+    data.fillna(0, inplace=True)
+    # Use model to predict outcome and probability
+    outcome = model.predict(data)
+    probability = model.predict_proba(data)[:, 1]  
+    
+    # Return outcome and probability
+    return outcome[0], probability[0]
+
+
+# Create a fonction to predict the outcome and the probability
+def predict_outcome_and_probability(model, features):
+    # DataFrame with features as columns
+    data = pd.DataFrame(columns=model.get_booster().feature_names, data=[features])
+    
+    # fill with NA for value not present
+    data.fillna(0, inplace=True)
+    
+    # Use model to predict outcome and probability
+    outcome = model.predict(data)
+    probability = model.predict_proba(data)[:, 1]  
+    
+    # Return outcome and probability
+    return outcome[0], probability[0]
